@@ -216,7 +216,7 @@ class Component(ComponentBase):
         request_number = item.get('app_item_id_formatted', None)
         headers = {'Authorization': f'Bearer {access_token}'}
         activities = []
-        date_threshold = datetime.now() - timedelta(days=10)
+        date_threshold = datetime.now() - timedelta(days=7)
 
         # Získání revizí
         revision_url = f'https://api.podio.com/item/{item_id}/revision'
@@ -307,10 +307,10 @@ class Component(ComponentBase):
         # Fetch items from Podio with pagination logic
         items = self.get_all_podio_items(app_id, max_items=2500)
 
-        # Filter records from the last 10 days
+        # Filter records from the last 7 days
         items_last_10_days = [
             item for item in items if
-            datetime.strptime(item['last_event_on'], '%Y-%m-%d %H:%M:%S') >= datetime.now() - timedelta(days=10)
+            datetime.strptime(item['last_event_on'], '%Y-%m-%d %H:%M:%S') >= datetime.now() - timedelta(days=7)
         ]
 
         # Transform items and rename columns
