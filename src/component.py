@@ -1,16 +1,11 @@
-'''
-Template Component main class.
-'''
-
-import csv
+# import csv
 import logging
-import requests
-import pandas as pd
 from datetime import datetime, timedelta
 
-from keboola.component.base import ComponentBase
 import keboola.component.exceptions
-
+import pandas as pd
+import requests
+from keboola.component.base import ComponentBase
 
 # Configuration variables
 KEY_CLIENT_ID = '#client_id'
@@ -25,10 +20,123 @@ REQUIRED_IMAGE_PARS = []
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logging.getLogger("requests").setLevel(logging.WARNING)   # Nastaví logování requests pouze na varování a chyby
-logging.getLogger("urllib3").setLevel(logging.WARNING)     # Nastaví logování urllib3 pouze na varování a chyby
+logging.getLogger("requests").setLevel(logging.WARNING)  # Nastaví logování requests pouze na varování a chyby
+logging.getLogger("urllib3").setLevel(logging.WARNING)  # Nastaví logování urllib3 pouze na varování a chyby
 
 
+def transform_podio_items(items):
+    transformed_data = []
+    for item in items:
+        item_data = {
+            'item_id': item['item_id'],
+            'external_id': item.get('external_id', None),
+            'request_number': item.get('app_item_id_formatted', None),
+            'request_link': item.get('link', None),
+            'title': item['title'],
+            'created_on': item['created_on'],
+            'last_event_on': item.get('last_event_on', None),
+            'created_by_name': item['created_by']['name'] if 'created_by' in item else None,
+            'realizuje_name': None,
+            'stav_text': None,
+            'datum_zmeny_stavu': None,
+            'kontrola_splneni_text': None,
+            'oblast_text': None,
+            'priorita_text': None,
+            'schvaleni_text': None,
+            'prostredi_text': None,
+            'signifikantni_zmena': None,
+            'poznamky_text': None,
+            'files': None,
+            'tags': None,
+            'tasks': None,
+            'jira_project_text': None,
+            'jira_link': None,
+            'pozadavek_text': None,
+            'zadani_text': None,
+            'zainteresovane_osoby': None
+        }
+
+        # Retrieve custom fields (fields)
+        for field in item['fields']:
+            field_label = field['label']
+            field_values = field['values']
+
+            if field_label == 'Požadavek':
+                item_data['pozadavek_text'] = field_values[0]['value'] if field_values else None
+            elif field_label == 'Stav':
+                item_data['stav_text'] = field_values[0]['value']['text'] if field_values else None
+                if item.get('last_event_on'):
+                    item_data['datum_zmeny_stavu'] = item['last_event_on']
+            elif field_label == 'Kontrola splnění požadavku':
+                item_data['kontrola_splneni_text'] = field_values[0]['value']['text'] if field_values else None
+            elif field_label == 'Oblast':
+                item_data['oblast_text'] = field_values[0]['value']['text'] if field_values else None
+            elif field_label == 'Klasifikace':
+                item_data['priorita_text'] = field_values[0]['value']['text'] if field_values else None
+            elif field_label == 'Schválení':
+                item_data['schvaleni_text'] = field_values[0]['value']['text'] if field_values else None
+            elif field_label == 'Prostředí':
+                # Prostředí může být vícenásobné, takže extrahujeme všechna prostředí jako text
+                item_data['prostredi_text'] = ', '.join([env['value']['text'] for env in field_values])
+            elif field_label == 'Signifikantní změna':
+                item_data['signifikantni_zmena'] = field_values[0]['value']['text'] if field_values else None
+            elif field_label == 'Poznámky':
+                item_data['poznamky_text'] = field_values[0]['value'] if field_values else None
+            elif field_label == 'Realizuje':
+                item_data['realizuje_name'] = field_values[0]['value']['name'] if field_values else None
+            elif field_label == 'Zainteresované osoby':
+                item_data['zainteresovane_osoby'] = ', '.join([person['value']['name'] for person in field_values])
+            elif field_label == 'Jira Link':
+                item_data['jira_link'] = field_values[0]['value'] if field_values else None
+            elif field_label == 'Zadání':
+                item_data['zadani_text'] = field_values[0]['value'] if field_values else None
+
+        # Collect files, tags, and tasks if available
+        if 'files' in item and item['files']:
+            item_data['files'] = ', '.join([file['name'] for file in item['files']])
+        if 'tags' in item and item['tags']:
+            item_data['tags'] = ', '.join(item['tags'])
+        if 'tasks' in item and item['tasks']:
+            item_data['tasks'] = ', '.join([task['title'] for task in item['tasks']])
+
+        transformed_data.append(item_data)
+
+    # Convert to Pandas DataFrame
+    df = pd.DataFrame(transformed_data)
+    logging.info(f"Data transformation completed, records: {len(df)}")
+    return df
+
+
+def get_revision_differences(item_id, revision_from, revision_to, headers):
+    diff_url = f'https://api.podio.com/item/{item_id}/revision/{revision_from}/{revision_to}'
+    diff_response = requests.get(diff_url, headers=headers)
+    if diff_response.status_code == 200:
+        differences = diff_response.json()
+
+        extracted_diffs = []
+        for diff in differences:
+            if diff.get("type") != "category":
+                continue
+
+            field_id = diff.get("field_id")
+            external_id = diff.get("external_id")
+            label = diff.get("label")
+
+            from_value = [item["value"].get("text", "N/A") for item in
+                          diff.get("from", [{"value": {"text": "N/A"}}])]
+            to_value = [item["value"].get("text", "N/A") for item in diff.get("to", [{"value": {"text": "N/A"}}])]
+
+            extracted_diffs.append({
+                "field_id": field_id,
+                "external_id": external_id,
+                "label": label,
+                "previous_value": ", ".join(from_value),
+                "new_value": ", ".join(to_value)
+            })
+        return extracted_diffs
+    else:
+        logging.error(f"Error retrieving revision differences: {diff_response.text}")
+        return None
 
 
 class Component(ComponentBase):
@@ -101,119 +209,9 @@ class Component(ComponentBase):
         return response.json().get('items', [])
 
     # Transform Podio items into DataFrame
-    def transform_podio_items(self, items):
-        transformed_data = []
-        for item in items:
-            item_data = {
-                'item_id': item['item_id'],
-                'external_id': item.get('external_id', None),
-                'request_number': item.get('app_item_id_formatted', None),
-                'request_link': item.get('link', None),
-                'title': item['title'],
-                'created_on': item['created_on'],
-                'last_event_on': item.get('last_event_on', None),
-                'created_by_name': item['created_by']['name'] if 'created_by' in item else None,
-                'realizuje_name': None,
-                'stav_text': None,
-                'datum_zmeny_stavu': None,
-                'kontrola_splneni_text': None,
-                'oblast_text': None,
-                'priorita_text': None,
-                'schvaleni_text': None,
-                'prostredi_text': None,
-                'signifikantni_zmena': None,
-                'poznamky_text': None,
-                'files': None,
-                'tags': None,
-                'tasks': None,
-                'jira_project_text': None,
-                'jira_link': None,
-                'pozadavek_text': None,
-                'zadani_text': None,
-                'zainteresovane_osoby': None
-            }
 
-            # Retrieve custom fields (fields)
-            for field in item['fields']:
-                field_label = field['label']
-                field_values = field['values']
-
-                if field_label == 'Požadavek':
-                    item_data['pozadavek_text'] = field_values[0]['value'] if field_values else None
-                elif field_label == 'Stav':
-                    item_data['stav_text'] = field_values[0]['value']['text'] if field_values else None
-                    if item.get('last_event_on'):
-                        item_data['datum_zmeny_stavu'] = item['last_event_on']
-                elif field_label == 'Kontrola splnění požadavku':
-                    item_data['kontrola_splneni_text'] = field_values[0]['value']['text'] if field_values else None
-                elif field_label == 'Oblast':
-                    item_data['oblast_text'] = field_values[0]['value']['text'] if field_values else None
-                elif field_label == 'Klasifikace':
-                    item_data['priorita_text'] = field_values[0]['value']['text'] if field_values else None
-                elif field_label == 'Schválení':
-                    item_data['schvaleni_text'] = field_values[0]['value']['text'] if field_values else None
-                elif field_label == 'Prostředí':
-                    # Prostředí může být vícenásobné, takže extrahujeme všechna prostředí jako text
-                    item_data['prostredi_text'] = ', '.join([env['value']['text'] for env in field_values])
-                elif field_label == 'Signifikantní změna':
-                    item_data['signifikantni_zmena'] = field_values[0]['value']['text'] if field_values else None
-                elif field_label == 'Poznámky':
-                    item_data['poznamky_text'] = field_values[0]['value'] if field_values else None
-                elif field_label == 'Realizuje':
-                    item_data['realizuje_name'] = field_values[0]['value']['name'] if field_values else None
-                elif field_label == 'Zainteresované osoby':
-                    item_data['zainteresovane_osoby'] = ', '.join([person['value']['name'] for person in field_values])
-                elif field_label == 'Jira Link':
-                    item_data['jira_link'] = field_values[0]['value'] if field_values else None
-                elif field_label == 'Zadání':
-                    item_data['zadani_text'] = field_values[0]['value'] if field_values else None
-
-            # Collect files, tags, and tasks if available
-            if 'files' in item and item['files']:
-                item_data['files'] = ', '.join([file['name'] for file in item['files']])
-            if 'tags' in item and item['tags']:
-                item_data['tags'] = ', '.join(item['tags'])
-            if 'tasks' in item and item['tasks']:
-                item_data['tasks'] = ', '.join([task['title'] for task in item['tasks']])
-
-            transformed_data.append(item_data)
-
-        # Convert to Pandas DataFrame
-        df = pd.DataFrame(transformed_data)
-        logging.info(f"Data transformation completed, records: {len(df)}")
-        return df
-
-    def get_revision_differences(self, item_id, revision_from, revision_to, headers):
-        diff_url = f'https://api.podio.com/item/{item_id}/revision/{revision_from}/{revision_to}'
-        diff_response = requests.get(diff_url, headers=headers)
-        if diff_response.status_code == 200:
-            differences = diff_response.json()
-
-            extracted_diffs = []
-            for diff in differences:
-                if diff.get("type") != "category":
-                    continue
-
-                field_id = diff.get("field_id")
-                external_id = diff.get("external_id")
-                label = diff.get("label")
-
-                from_value = [item["value"].get("text", "N/A") for item in diff.get("from", [{"value": {"text": "N/A"}}])]
-                to_value = [item["value"].get("text", "N/A") for item in diff.get("to", [{"value": {"text": "N/A"}}])]
-
-                extracted_diffs.append({
-                    "field_id": field_id,
-                    "external_id": external_id,
-                    "label": label,
-                    "previous_value": ", ".join(from_value),
-                    "new_value": ", ".join(to_value)
-                })
-            return extracted_diffs
-        else:
-            logging.error(f"Error retrieving revision differences: {diff_response.text}")
-            return None
-
-    def get_item_revisions_and_comments(self, item, access_token):
+    @staticmethod
+    def get_item_revisions_and_comments(item, access_token):
         item_id = item['item_id']
         request_number = item.get('app_item_id_formatted', None)
         headers = {'Authorization': f'Bearer {access_token}'}
@@ -248,7 +246,7 @@ class Component(ComponentBase):
                 prev_revision = revisions[i - 1]
                 current_revision = revisions[i]
 
-                revision_diff = self.get_revision_differences(
+                revision_diff = get_revision_differences(
                     item_id,
                     prev_revision['revision'],
                     current_revision['revision'],
@@ -316,7 +314,7 @@ class Component(ComponentBase):
         ]
 
         # Transform items and rename columns
-        df_podio = self.transform_podio_items(items_last_10_days)
+        df_podio = transform_podio_items(items_last_10_days)
 
         column_rename_map = {
             'item_id': 'item_id',
