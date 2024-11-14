@@ -1,2 +1,5 @@
-Testing functional sample extractor for purposes of the python component template. 
-Implements partial Hubspot extractor using the public sandbox token.
+<h2>Podio API data extraction.</h2>
+
+<b>Output:</b><br>
+items.csv - item list<br>
+activities.csv - item activities list (revision & comments)
