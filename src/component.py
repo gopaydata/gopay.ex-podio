@@ -370,8 +370,10 @@ class Component(ComponentBase):
         for item in items_last_10_days:
             try:
                 activities = self.get_item_revisions_and_comments(item, self.access_token)
-                if len(activities) == 0: break
-                all_activities.extend(activities)
+                if len(activities) == 0:
+                    break
+                else:
+                    all_activities.extend(activities)
             except Exception as e:
                 logging.warning(f"Error processing activities for item {item['item_id']}: {e}")
                 break
