@@ -305,7 +305,7 @@ class Component(ComponentBase):
         app_id = self.configuration.parameters.get(KEY_APP_ID)
 
         # Fetch items from Podio with pagination logic
-        items = self.get_all_podio_items(app_id, max_items=2500)
+        items = self.get_all_podio_items(app_id, max_items=1000)
 
         # Filter records from the last 7 days
         items_last_10_days = [
