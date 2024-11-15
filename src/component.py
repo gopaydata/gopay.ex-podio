@@ -232,7 +232,8 @@ class Component(ComponentBase):
             if revisions:
                 creation_revision = revisions[0]
                 activities.append({
-                    'ID': item_id,
+                    'id': item_id,
+                    'item_revision_id': creation_revision.get('item_revision_id'),
                     'request_number': request_number,
                     'type': 'creation',
                     'author': creation_revision.get('created_by', {}).get('name', 'Unknown'),
@@ -256,7 +257,8 @@ class Component(ComponentBase):
                 if revision_diff:
                     for change in revision_diff:
                         activities.append({
-                            'ID': item_id,
+                            'id': item_id,
+                            'item_revision_id': current_revision.get('item_revision_id'),
                             'request_number': request_number,
                             'type': 'update',
                             'author': current_revision.get('created_by', {}).get('name', 'Unknown'),
@@ -279,7 +281,8 @@ class Component(ComponentBase):
             ]
             for comment in comments:
                 activities.append({
-                    'ID': item_id,
+                    'id': item_id,
+                    'item_revision_id': comment.get('comment_id'),
                     'request_number': request_number,
                     'type': 'comment',
                     'author': comment.get('created_by', {}).get('name', 'Unknown'),
@@ -381,11 +384,17 @@ class Component(ComponentBase):
         # Zajištění prázdného CSV, pokud nejsou žádné aktivity
         if not all_activities:
             df_activities = pd.DataFrame(columns=[
-                'ID', 'request_number', 'type', 'author', 'date',
+                'id', 'item_revision_id', 'request_number', 'type', 'author', 'date',
                 'changed_field', 'previous_value', 'new_value'
             ])
         else:
             df_activities = pd.DataFrame(all_activities)
+
+        # Úprava sloupců id a item_revision_id
+        if 'id' in df_activities.columns:
+            df_activities['id'] = df_activities['id'].fillna(0).astype('Int64')
+        if 'item_revision_id' in df_activities.columns:
+            df_activities['item_revision_id'] = df_activities['item_revision_id'].fillna(0).astype('Int64')
 
         # Uložení aktivit do CSV
         df_activities.to_csv(out_table_path2, sep='\t', index=False)
