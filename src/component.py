@@ -1,7 +1,7 @@
 # import csv
 import logging
 from datetime import datetime, timedelta
-
+import json
 import keboola.component.exceptions
 import pandas as pd
 import requests
@@ -149,6 +149,7 @@ class Component(ComponentBase):
         super().__init__()
         self.access_token = None
         self.authenticate_podio()
+        self.limit_rate = False
 
     # Authenticate to Podio API and retrieve access token
     def authenticate_podio(self):
@@ -293,6 +294,7 @@ class Component(ComponentBase):
 
     # Main execution logic
     def run(self):
+        # Definice výstupních tabulek
         pozadavky = self.create_out_table_definition('items.csv')
         aktivity = self.create_out_table_definition('activities.csv')
 
@@ -304,16 +306,16 @@ class Component(ComponentBase):
 
         app_id = self.configuration.parameters.get(KEY_APP_ID)
 
-        # Fetch items from Podio with pagination logic
+        # Načtení položek z Podio
         items = self.get_all_podio_items(app_id, max_items=1000)
 
-        # Filter records from the last 7 days
+        # Filtrování záznamů z posledních 7 dnů
         items_last_10_days = [
             item for item in items if
             datetime.strptime(item['last_event_on'], '%Y-%m-%d %H:%M:%S') >= datetime.now() - timedelta(days=7)
         ]
 
-        # Transform items and rename columns
+        # Transformace položek a přejmenování sloupců
         df_podio = transform_podio_items(items_last_10_days)
 
         column_rename_map = {
@@ -345,22 +347,48 @@ class Component(ComponentBase):
             'zainteresovane_osoby': 'interested_persons'
         }
 
-        # Rename columns
+        def create_manifest(file_path, delimiter='\t', enclosure='"'):
+            """
+            Vytvoří manifest pro CSV soubor.
+            """
+            manifest = {
+                "delimiter": delimiter,
+                "enclosure": enclosure
+            }
+            manifest_path = f"{file_path}.manifest"
+            with open(manifest_path, 'w', encoding='utf-8') as manifest_file:
+                json.dump(manifest, manifest_file)
+            logging.info(f"Manifest file created at {manifest_path}.")
+
         df_podio.rename(columns=column_rename_map, inplace=True)
-        # Save with semicolon as delimiter
         df_podio.to_csv(out_table_path, sep='\t', index=False)
         logging.info(f"Transformed data saved to {out_table_path}.")
+        create_manifest(out_table_path)  # Vytvoření manifestu pro položky
 
-        # Pro každý požadavek načteme aktivity (revize a komentáře)
+        # Zpracování aktivit (revize a komentáře)
         all_activities = []
         for item in items_last_10_days:
-            activities = self.get_item_revisions_and_comments(item, self.access_token)
-            all_activities.extend(activities)
+            try:
+                activities = self.get_item_revisions_and_comments(item, self.access_token)
+                if len(activities) == 0: break
+                all_activities.extend(activities)
+            except Exception as e:
+                logging.warning(f"Error processing activities for item {item['item_id']}: {e}")
+                break
 
-        df_activities = pd.DataFrame(all_activities)
-        # Save with semicolon as delimiter
+        # Zajištění prázdného CSV, pokud nejsou žádné aktivity
+        if not all_activities:
+            df_activities = pd.DataFrame(columns=[
+                'ID', 'request_number', 'type', 'author', 'date',
+                'changed_field', 'previous_value', 'new_value'
+            ])
+        else:
+            df_activities = pd.DataFrame(all_activities)
+
+        # Uložení aktivit do CSV
         df_activities.to_csv(out_table_path2, sep='\t', index=False)
         logging.info(f"Activities data saved to {out_table_path2}.")
+        create_manifest(out_table_path2)  # Vytvoření manifestu pro aktivity
 
 
 # Main entry point
