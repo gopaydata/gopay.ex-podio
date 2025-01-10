@@ -14,3 +14,5 @@ __pycache__/
 # Test file
 /src/component_data.py
 /src/component_test.py
+/src/component_data_2.py
+/src/component_data_3.py

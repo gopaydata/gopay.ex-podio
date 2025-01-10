@@ -8,8 +8,8 @@ import requests
 from keboola.component.base import ComponentBase
 
 # Configuration variables
-KEY_CLIENT_ID = '#client_id'
-KEY_CLIENT_SECRET = '#client_secret'
+KEY_CLIENT_ID = '#client_id3'
+KEY_CLIENT_SECRET = '#client_secret3'
 KEY_USERNAME = 'username'
 KEY_PASSWORD = '#password'
 KEY_APP_ID = 'app_id'
@@ -43,6 +43,7 @@ def transform_podio_items(items):
             'oblast_text': None,
             'priorita_text': None,
             'schvaleni_text': None,
+            'schvaleni_sec_text': None,
             'prostredi_text': None,
             'signifikantni_zmena': None,
             'poznamky_text': None,
@@ -75,6 +76,8 @@ def transform_podio_items(items):
                 item_data['priorita_text'] = field_values[0]['value']['text'] if field_values else None
             elif field_label == 'Schválení':
                 item_data['schvaleni_text'] = field_values[0]['value']['text'] if field_values else None
+            elif field_label == 'Schválení - Security manager':
+                item_data['schvaleni_sec_text'] = field_values[0]['value']['text'] if field_values else None
             elif field_label == 'Prostředí':
                 # Prostředí může být vícenásobné, takže extrahujeme všechna prostředí jako text
                 item_data['prostredi_text'] = ', '.join([env['value']['text'] for env in field_values])
@@ -206,7 +209,7 @@ class Component(ComponentBase):
         if response.status_code != 200:
             logging.error(f"Error retrieving items: {response.text}")
             raise Exception(f"Failed to retrieve items: {response.text}")
-
+        print(response.json().get('items', [0]))
         return response.json().get('items', [])
 
     # Transform Podio items into DataFrame
@@ -217,7 +220,7 @@ class Component(ComponentBase):
         request_number = item.get('app_item_id_formatted', None)
         headers = {'Authorization': f'Bearer {access_token}'}
         activities = []
-        date_threshold = datetime.now() - timedelta(days=7)
+        date_threshold = datetime.now() - timedelta(days=30)
 
         # Získání revizí
         revision_url = f'https://api.podio.com/item/{item_id}/revision'
@@ -310,12 +313,12 @@ class Component(ComponentBase):
         app_id = self.configuration.parameters.get(KEY_APP_ID)
 
         # Načtení položek z Podio
-        items = self.get_all_podio_items(app_id, max_items=1000)
+        items = self.get_all_podio_items(app_id, max_items=2000)
 
         # Filtrování záznamů z posledních 7 dnů
         items_last_10_days = [
             item for item in items if
-            datetime.strptime(item['last_event_on'], '%Y-%m-%d %H:%M:%S') >= datetime.now() - timedelta(days=7)
+            datetime.strptime(item['last_event_on'], '%Y-%m-%d %H:%M:%S') >= datetime.now() - timedelta(days=14)
         ]
 
         # Transformace položek a přejmenování sloupců
@@ -337,6 +340,7 @@ class Component(ComponentBase):
             'oblast_text': 'area',
             'priorita_text': 'priority',
             'schvaleni_text': 'approval',
+            'schvaleni_sec_text': 'approval_sec',
             'prostredi_text': 'environment',
             'signifikantni_zmena': 'significant_change',
             'poznamky_text': 'notes',
